@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Test double for exiftool. Understands exactly the invocation sort-photos.sh
+# uses: -p '${Tag1}\t...\t${TagN}\t$FilePath' -f -d FMT -@ listfile
+# "EXIF data" is read from the first line of the test file itself:
+#   EXIF:<date>   -> reported as DateTimeOriginal (tag slot 1)
+#   EXIFC:<date>  -> reported as CreateDate      (tag slot 2)
+# anything else   -> no tags at all ("-" everywhere, like exiftool -f)
+fmt=''; list=''
+while (($#)); do
+	case $1 in
+	-p) fmt=$2; shift 2 ;;
+	-@) list=$2; shift 2 ;;
+	-d) shift 2 ;;
+	*) shift ;;
+	esac
+done
+# Real exiftool does NOT expand "\t" escapes in a -p format string given on the
+# command line - only real tab characters separate fields. Count those, so this
+# stub fails the same way the real binary does if the script ever regresses.
+tabs=${fmt//[!$'\t']/}
+ntags=${#tabs}
+while IFS= read -r f; do
+	d=''; slot=1
+	if [[ -f $f ]]; then
+		first=$(head -c 200 -- "$f" | head -1)
+		case $first in
+		EXIF:*) d=${first#EXIF:}; slot=1 ;;
+		EXIFC:*) d=${first#EXIFC:}; slot=2 ;;
+		esac
+	fi
+	out=''
+	for ((i = 1; i <= ntags; i++)); do
+		if [[ -n $d && $i == "$slot" ]]; then out+="$d"$'\t'; else out+='-'$'\t'; fi
+	done
+	printf '%s%s\n' "$out" "$f"
+done <"$list"

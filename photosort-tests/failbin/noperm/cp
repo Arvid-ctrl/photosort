@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Test double for GNU cp on a filesystem without unix permissions (exFAT/NTFS/SMB).
+# Mimics the real thing: the DATA is written, then setting the mode fails, cp
+# prints "preserving permissions ...: Operation not supported" and exits 1.
+# Only files whose name contains "noperm" trigger it, to mirror the reported
+# "happens only for some files" behaviour.
+args=(); preserve=0
+for a in "$@"; do
+	case $a in
+	-p) preserve=1 ;;                       # mode+owner+times: refused
+	--preserve=timestamps) ;;               # FAT does store mtime: fine
+	--preserve|--preserve=*) preserve=1 ;;
+	--) ;;
+	*) args+=("$a") ;;
+	esac
+done
+src=${args[0]}; dst=${args[1]}
+/bin/cp -- "$src" "$dst" || exit 2               # the data always lands
+if ((preserve)) && [[ $src == *noperm* ]]; then
+	echo "cp: preserving permissions for '$dst': Operation not supported" >&2
+	exit 1
+fi
+exit 0

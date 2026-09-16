@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Test double for GNU mv moving ACROSS filesystems onto a target that cannot
+# store unix permissions. Real mv copies the data, removes the original, then
+# fails to apply the mode - printing a warning and exiting 1 even though the
+# move is effectively complete.
+args=(); for a in "$@"; do [[ $a == -- ]] || args+=("$a"); done
+src=${args[0]}; dst=${args[1]}
+/bin/cp -- "$src" "$dst" || exit 2
+case $src in
+*noperm*)
+	/bin/rm -f -- "$src"
+	echo "mv: preserving permissions for '$dst': Operation not supported" >&2
+	exit 1 ;;
+*keepsrc*)
+	# data is across, but the original could not be unlinked
+	echo "mv: cannot remove '$src': Permission denied" >&2
+	exit 1 ;;
+esac
+/bin/rm -f -- "$src"

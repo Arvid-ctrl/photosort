@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# Fails the first N attempts per file (state in $FLAKY_DIR), then succeeds.
+args=()
+for a in "$@"; do case $a in -p|--preserve|--preserve=*|--) ;; *) args+=("$a") ;; esac; done
+src=${args[0]}; dst=${args[1]}
+key=$FLAKY_DIR/$(echo -n "$src" | md5sum | cut -d' ' -f1)
+n=0; [[ -f $key ]] && n=$(cat "$key")
+if (( n < ${FLAKY_FAILS:-1} )); then
+	echo $((n + 1)) > "$key"
+	echo "cp: cannot create regular file '$dst': Input/output error" >&2
+	exit 1
+fi
+/bin/cp -- "$src" "$dst"
