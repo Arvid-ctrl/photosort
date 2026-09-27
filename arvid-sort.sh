@@ -95,7 +95,7 @@ ensure_dir() {
 
   if [[ $DRYRUN == true ]]; then
     [[ -n ${dryrunDirs["$path"]+x} ]] && return 0
-    [[ $VERBOSE == true ]] && echo "$path already exists." >&2
+    [[ $VERBOSE == true ]] && echo "Would create $path." >&2
     dryrunDirs["$path"]=true
   else
     [[ $VERBOSE == true ]] && echo "creating $path" >&2
@@ -169,7 +169,7 @@ while [[ $# -gt 0 ]]; do
     RENAME=false
     shift 1 # consume only the flag
     ;;
-  --de-dup)
+  --dedup)
     # value is the next argument
     DEDUP=true
     shift 1 # consume only the flag
@@ -193,7 +193,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-if [[ -z $SOURCE && ! -d $SOURCE ]]; then
+if [[ -z $SOURCE || ! -d $SOURCE ]]; then
   echo -e "error: Source must be a valid directory." >&2
   exit 1
 fi
@@ -206,6 +206,15 @@ discover SRC_FILES "$SOURCE"
 if [[ -d $TARGET ]] && ! inside "$TARGET" "$SOURCE"; then
   [[ $VERBOSE == true ]] && echo "target is outside source."
   discover TARGET_FILES "$TARGET"
+  get_exif_all TARGET_EXIF "${TARGET_FILES[@]}"
+else
+  for f in "${SRC_FILES[@]}"; do
+    case "$f" in
+    "${TARGET%/}/"*)
+      TARGET_FILES+=("$f")
+      ;;
+    esac
+  done
   get_exif_all TARGET_EXIF "${TARGET_FILES[@]}"
 fi
 
@@ -224,11 +233,6 @@ for f in "${SRC_FILES[@]}"; do
   is_photo "$f" || continue
   [[ -n ${SRC_EXIF[$f]} ]] || continue # no EXIF date -> fallback/unsorted
   date=${SRC_EXIF[$f]}
-
-  if [[ -z $date ]]; then
-    [[ $VERBOSE == true ]] && echo -e "warning: no date on $f, skipping." >&2
-    continue
-  fi
 
   declare year=${date:0:4}
   declare month=${date:5:2}
@@ -249,52 +253,50 @@ for f in "${SRC_FILES[@]}"; do
     target_name="$date.$file_ext"
   fi
 
-  if [[ -d "$dest_dir" ]]; then
+  dest="$dest_dir/$target_name"
+
+  if [[ $DEDUP == true && -n ${EXIF_TARGET["$date"]+x} ]]; then
+    while IFS= read -r cand; do
+      [[ -n $cand ]] || continue
+
+      if inside "$cand" "$dest_dir" && check_hash "$f" "$cand"; then
+        # TODO: check which file has the shorter name and keep it
+        dest_dir="$TARGET/duplicates/$year/$month/$day"
+        ensure_dir "$dest_dir"
+        dest="$dest_dir/$target_name"
+        break
+      fi
+
+    done <<<"${EXIF_TARGET["$date"]}"
+  fi
+
+  declare dup_suffix=0
+
+  while [[ -e "$dest" || -n "${claimedPaths["$dest"]+x}" ]]; do
+    dup_suffix++
+    target_name="$base_name($dup_suffix).$file_ext"
     dest="$dest_dir/$target_name"
+  done
 
-    if [[ $DEDUP == true && -n ${EXIF_TARGET["$date"]+x} ]]; then
-      while IFS= read -r cand; do
-        [[ -n $cand ]] || continue
+  claimedPaths["$dest"]=true
 
-        if inside "$cand" "$dest_dir" && check_hash "$f" "$cand"; then
-          # TODO: check which file has the shorter name and keep it
-          dest_dir="$TARGET/duplicates/$year/$month/$day"
-          ensure_dir "$dest_dir"
-          dest="$dest_dir/$target_name"
-          break
-        fi
-
-      done <<<"${EXIF_TARGET["$date"]}"
+  if [[ $DRYRUN == true ]]; then
+    [[ $VERBOSE == true ]] && echo "Would move $f to $dest" >&2
+  elif [[ $MODE == move ]]; then
+    [[ $VERBOSE == true ]] && echo "Moving $f to $dest" >&2
+    if ! mv "$f" "$dest" 2>/dev/null; then
+      echo -e "error: could not move $f to $dest" >&2
     fi
-
-    declare dup_suffix=0
-
-    while [[ -e "$dest" || -n "${claimedPaths["$dest"]+x}" ]]; do
-      dup_suffix++
-      target_name="$base_name($dup_suffix).$file_ext"
-      dest="$dest_dir/$target_name"
-    done
-
-    claimedPaths["$dest"]=true
-
-    if [[ $DRYRUN == true ]]; then
-      [[ $VERBOSE == true ]] && echo "Would move $f to $dest" >&2
-    elif [[ $MODE == move ]]; then
-      [[ $VERBOSE == true ]] && echo "Moving $f to $dest" >&2
-      if ! mv "$f" "$dest" 2>/dev/null; then
-        echo -e "error: could not move $f to $dest" >&2
-      fi
-    elif [[ $MODE == copy ]]; then
-      [[ $VERBOSE == true ]] && echo "Copying $f to $dest" >&2
-      if ! cp "$f" "$dest" 2>/dev/null; then
-        echo -e "error: could not move $f to $dest" >&2
-      fi
+  elif [[ $MODE == copy ]]; then
+    [[ $VERBOSE == true ]] && echo "Copying $f to $dest" >&2
+    if ! cp "$f" "$dest" 2>/dev/null; then
+      echo -e "error: could not copy $f to $dest" >&2
     fi
+  fi
 
   # TODO:
   # check for sidecars
   # rename sidecars if needed
   # check for conflicts (file or sidecar)
-  fi
 
 done
